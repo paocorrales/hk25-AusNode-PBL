@@ -1,0 +1,66 @@
+---
+title: "Cold Fronts in hi-res simulations"
+output: html_document
+date: "2025-05-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(lubridate)
+library(data.table)
+library(purrr)
+library(metR)
+```
+
+```{r}
+um_data <- map(Sys.glob("data/*_UM.csv"), function(f) {
+  
+  meta <- unglue::unglue(basename(f), "{city}_{model}.csv")
+  
+  fread(f) |> 
+    _[, let(location = meta[[1]][["city"]], 
+            model = meta[[1]][["model"]])]
+  
+}) |> 
+  rbindlist() |> 
+  _[, .(tas = max(tas, na.rm = TRUE)), by = .(time = floor_date(time, "day"), lon, lat, location, model)] |> 
+  _[, let(time = as_date(time))]
+
+icon_data <- map(Sys.glob("data/*_ICON.csv"), function(f) {
+  
+  meta <- unglue::unglue(basename(f), "{city}_{model}.csv")
+  
+  fread(f) |> 
+    _[, let(location = meta[[1]][["city"]], 
+            model = meta[[1]][["model"]])]
+  
+}) |> 
+  rbindlist() |> 
+  _[, .(tas = max(tas, na.rm = TRUE)), by = .(time = floor_date(time, "day"), lon, lat, location, model)] |> 
+  _[, let(time = as_date(time))]
+
+tfall <- rbind(um_data, icon_data, ignore.attr = TRUE) |> 
+  _[, let(delta_t = tas - shift(tas, n = 1)), by = .(location, model, lon, lat)] |> 
+  _[, let(tfall = delta_t <= -10)] |> 
+  _[]
+```
+
+```{r}
+era5 <- ReadNetCDF("/g/data/w40/pc2687/cf/data/era5/deltat_10_era5.nc", vars = "t2m",
+                   subset = list(time = c("2020-10-01", "2021-03-31"),
+                                 list(lat = 54, lon = 34), 
+                                 list(lat = 10, lon = 20)))
+```
+
+
+```{r}
+tfall |> 
+  _[time %between% ymd(c(20201001, 20210331))] |> 
+  # _[]
+  ggplot(aes(delta_t)) +
+  geom_density(aes(color = model)) +
+  facet_wrap(~location)
+```
+
